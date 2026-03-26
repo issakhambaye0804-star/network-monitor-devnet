@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Monitor - {{ node_id }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-green {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-green {
+            animation: pulse-green 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-center mb-2">
+                🌐 Network Monitor Distribué
+            </h1>
+            <p class="text-center text-gray-400">
+                Nœud actuel: <span class="text-blue-400 font-mono">{{ node_id }}</span>
+            </p>
+        </header>
+
+        <!-- Status Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-300">CPU Usage</h3>
+                        <p class="text-3xl font-bold text-blue-400" id="cpu-usage">--%</p>
+                    </div>
+                    <div class="text-4xl">💻</div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-300">Memory Usage</h3>
+                        <p class="text-3xl font-bold text-green-400" id="memory-usage">--%</p>
+                    </div>
+                    <div class="text-4xl">🧠</div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-300">Connections</h3>
+                        <p class="text-3xl font-bold text-yellow-400" id="connections">--</p>
+                    </div>
+                    <div class="text-4xl">🔗</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-xl font-semibold mb-4">CPU & Memory Usage</h3>
+                <canvas id="performance-chart"></canvas>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-xl font-semibold mb-4">Network Traffic</h3>
+                <canvas id="network-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Network Nodes -->
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8">
+            <h3 class="text-xl font-semibold mb-4">Network Nodes Status</h3>
+            <div id="nodes-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Nodes will be populated here -->
+            </div>
+        </div>
+
+        <!-- Network Test -->
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <h3 class="text-xl font-semibold mb-4">Network Connectivity Test</h3>
+            <button onclick="testNetwork()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors">
+                Test Network Connectivity
+            </button>
+            <div id="network-test-results" class="mt-4"></div>
+        </div>
+    </div>
+
+    <script>
+        // Chart configurations
+        const performanceCtx = document.getElementById('performance-chart').getContext('2d');
+        const networkCtx = document.getElementById('network-chart').getContext('2d');
+
+        const performanceChart = new Chart(performanceCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'CPU Usage (%)',
+                    data: [],
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Memory Usage (%)',
+                    data: [],
+                    borderColor: 'rgb(34, 197, 94)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+
+        const networkChart = new Chart(networkCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Bytes Sent',
+                    data: [],
+                    borderColor: 'rgb(168, 85, 247)',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Bytes Received',
+                    data: [],
+                    borderColor: 'rgb(251, 146, 60)',
+                    backgroundColor: 'rgba(251, 146, 60, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Update functions
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                
+                document.getElementById('cpu-usage').textContent = data.cpu_usage.toFixed(1) + '%';
+                document.getElementById('memory-usage').textContent = data.memory_usage.toFixed(1) + '%';
+                document.getElementById('connections').textContent = data.active_connections;
+
+                // Update charts
+                const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                
+                // Keep only last 10 data points
+                if (performanceChart.data.labels.length >= 10) {
+                    performanceChart.data.labels.shift();
+                    performanceChart.data.datasets[0].data.shift();
+                    performanceChart.data.datasets[1].data.shift();
+                }
+                
+                performanceChart.data.labels.push(timestamp);
+                performanceChart.data.datasets[0].data.push(data.cpu_usage);
+                performanceChart.data.datasets[1].data.push(data.memory_usage);
+                performanceChart.update();
+
+                // Update network chart
+                if (networkChart.data.labels.length >= 10) {
+                    networkChart.data.labels.shift();
+                    networkChart.data.datasets[0].data.shift();
+                    networkChart.data.datasets[1].data.shift();
+                }
+                
+                networkChart.data.labels.push(timestamp);
+                networkChart.data.datasets[0].data.push(data.network_bytes_sent / 1024 / 1024); // Convert to MB
+                networkChart.data.datasets[1].data.push(data.network_bytes_recv / 1024 / 1024); // Convert to MB
+                networkChart.update();
+
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+
+        async function updateNodes() {
+            try {
+                const response = await fetch('/api/nodes');
+                const nodes = await response.json();
+                
+                const container = document.getElementById('nodes-container');
+                container.innerHTML = '';
+                
+                nodes.forEach(node => {
+                    const statusColor = node.status === 'active' ? 'bg-green-500' : 'bg-red-500';
+                    const pulseAnimation = node.status === 'active' ? 'pulse-green' : '';
+                    
+                    const nodeCard = document.createElement('div');
+                    nodeCard.className = 'bg-gray-700 rounded-lg p-4 border border-gray-600';
+                    nodeCard.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-sm">${node.node_id}</h4>
+                                <p class="text-xs text-gray-400">${node.ip_address}</p>
+                                <p class="text-xs text-gray-500">${new Date(node.last_seen).toLocaleString()}</p>
+                            </div>
+                            <div class="w-3 h-3 ${statusColor} rounded-full ${pulseAnimation}"></div>
+                        </div>
+                    `;
+                    container.appendChild(nodeCard);
+                });
+                
+            } catch (error) {
+                console.error('Error updating nodes:', error);
+            }
+        }
+
+        async function testNetwork() {
+            const resultsDiv = document.getElementById('network-test-results');
+            resultsDiv.innerHTML = '<p class="text-yellow-400">Testing network connectivity...</p>';
+            
+            try {
+                const response = await fetch('/api/network-test');
+                const data = await response.json();
+                
+                let html = `
+                    <div class="mt-4 space-y-2">
+                        <p><strong>Node ID:</strong> ${data.node_id}</p>
+                        <p><strong>Database:</strong> <span class="${data.database === 'OK' ? 'text-green-400' : 'text-red-400'}">${data.database}</span></p>
+                        <div class="mt-2">
+                            <strong>Nodes:</strong>
+                            <ul class="list-disc list-inside mt-1">
+                `;
+                
+                for (const [node, status] of Object.entries(data.nodes)) {
+                    const statusClass = status === 'OK' ? 'text-green-400' : 'text-red-400';
+                    html += `<li class="${statusClass}">${node}: ${status}</li>`;
+                }
+                
+                html += `
+                            </ul>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">Test performed at: ${new Date(data.timestamp).toLocaleString()}</p>
+                    </div>
+                `;
+                
+                resultsDiv.innerHTML = html;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+            }
+        }
+
+        // Initialize updates
+        updateStats();
+        updateNodes();
+        
+        // Set up periodic updates
+        setInterval(updateStats, 5000);  // Update stats every 5 seconds
+        setInterval(updateNodes, 10000); // Update nodes every 10 seconds
+    </script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+# Docker Compose pour l'application Network Monitor
+# Projet d'Examen DEVNET - L3 RI ISI Keur Massar
+
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  db:
+    image: postgres:15
+    container_name: network_monitor_db
+    environment:
+      POSTGRES_DB: network_monitor
+      POSTGRES_USER: network_user
+      POSTGRES_PASSWORD: network_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - network_monitor_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U network_user -d network_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Instance 1 de l'application Flask
+  app1:
+    build: .
+    container_name: network_monitor_app1
+    environment:
+      DATABASE_URL: postgresql://network_user:network_pass@db:5432/network_monitor
+      NODE_ID: node-1
+      OTHER_NODES: http://app2:5000
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - network_monitor_net
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Instance 2 de l'application Flask
+  app2:
+    build: .
+    container_name: network_monitor_app2
+    environment:
+      DATABASE_URL: postgresql://network_user:network_pass@db:5432/network_monitor
+      NODE_ID: node-2
+      OTHER_NODES: http://app1:5000
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - network_monitor_net
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx pour le load balancing (optionnel)
+  nginx:
+    image: nginx:alpine
+    container_name: network_monitor_nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "80:80"
+    depends_on:
+      - app1
+      - app2
+    networks:
+      - network_monitor_net
+    restart: unless-stopped
+
+# Réseau Docker personnalisé pour la communication entre services
+networks:
+  network_monitor_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes pour la persistance des données
+volumes:
+  postgres_data:
+    driver: local
